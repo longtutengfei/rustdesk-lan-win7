@@ -10,7 +10,7 @@ on:
       custom-release-suffix:
         description: "Custom release suffix (increment each release, e.g. 0.1, 0.2, 0.3)"
         required: true
-        default: "0.1"
+        default: "0.2"
   # LAN運用向け: GitHub Actions利用制限回避のため自動実行は無効化
 
 concurrency:

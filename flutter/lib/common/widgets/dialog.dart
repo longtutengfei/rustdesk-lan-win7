@@ -78,7 +78,7 @@ void changeIdDialog() {
 
   final rules = [
     RegexValidationRule('starts with a letter', RegExp(r'^[a-zA-Z]')),
-    LengthRangeValidationRule(6, 16),
+    LengthRangeValidationRule(4, 16),
     RegexValidationRule('allowed characters', RegExp(r'^[\w-]*$'))
   ];
 
