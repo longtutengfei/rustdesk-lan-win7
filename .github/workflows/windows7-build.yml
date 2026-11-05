@@ -44,6 +44,13 @@ jobs:
         with:
           arch: x64
 
+      - name: Restore isolated Win7 vcpkg paths
+        # vcvarsall exports Visual Studio's bundled VCPKG_ROOT, overriding
+        # the job environment. Keep our pinned checkout in its own directory.
+        run: |
+          'VCPKG_ROOT=C:\vcpkg-rustdesk-lan-win7' >> $env:GITHUB_ENV
+          'VCPKG_INSTALLED_ROOT=C:\vcpkg-rustdesk-lan-win7\installed' >> $env:GITHUB_ENV
+
       - name: Install LLVM for Rust bindings and Flutter Rust Bridge
         uses: KyleMayes/install-llvm-action@ebc0426251bc40c7cd31162802432c68818ab8f0
         with:
