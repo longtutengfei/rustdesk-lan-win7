@@ -140,7 +140,7 @@ class EngineDownloadTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.archive = Path(temporary.name) / "cache/engine.zip"
+        self.archive = Path(temporary.name).resolve() / "cache/engine.zip"
         payload = io.BytesIO()
         with zipfile.ZipFile(payload, "w") as package:
             for name in ("flutter_windows.dll", "flutter_windows.dll.lib",
