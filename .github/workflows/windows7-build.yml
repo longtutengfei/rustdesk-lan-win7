@@ -74,8 +74,22 @@ jobs:
           targets: x86_64-pc-windows-msvc
           components: rustfmt
 
-      - name: Cache the verified custom engine archive
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      - name: Restore the verified custom engine archive
+        id: engine-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: target/windows7/windows-x64-release.zip
+          key: rustdesk-lan-win7-engine-${{ hashFiles('scripts/windows7/profile.json') }}
+
+      - name: Download and verify the pinned engine before compiling
+        run: |
+          python scripts/windows7/prepare_flutter.py --prefetch-engine
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Windows 7 engine download or verification failed' }
+
+      - name: Save the verified engine archive before compiling
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: target/windows7/windows-x64-release.zip
           key: rustdesk-lan-win7-engine-${{ hashFiles('scripts/windows7/profile.json') }}

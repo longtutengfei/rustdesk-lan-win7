@@ -1,12 +1,17 @@
 """Regression tests for the compatibility build's isolation and engine guards."""
 
 import hashlib
+import http.client
+import io
 import json
 from pathlib import Path
 import shutil
+import socket
+import ssl
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
+import urllib.error
 import zipfile
 
 import build
@@ -129,6 +134,142 @@ class EngineInstallationTests(unittest.TestCase):
                 prepare_flutter.install_engine(self.sdk, archive)
         self.assertFalse((self.destination.parent / "outside.dll").exists())
         self.assertEqual((self.destination / "flutter_windows.dll").read_bytes(), b"existing engine")
+
+
+class EngineDownloadTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.archive = Path(temporary.name) / "cache/engine.zip"
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as package:
+            for name in ("flutter_windows.dll", "flutter_windows.dll.lib",
+                         "flutter_windows.h", "gen_snapshot.exe"):
+                package.writestr(name, b"download fixture only")
+        self.payload = payload.getvalue()
+        profile = patch.dict(prepare_flutter.PROFILE["engine"],
+                             {"sha256": hashlib.sha256(self.payload).hexdigest()})
+        profile.start()
+        self.addCleanup(profile.stop)
+        download = patch("prepare_flutter.urllib.request.urlopen")
+        self.download = download.start()
+        self.addCleanup(download.stop)
+        sleep = patch("prepare_flutter.time.sleep")
+        self.sleep = sleep.start()
+        self.addCleanup(sleep.stop)
+
+    def response(self, payload=None, expected_size=None):
+        payload = self.payload if payload is None else payload
+        response = io.BytesIO(payload)
+        response.headers = {"Content-Length": str(
+            len(payload) if expected_size is None else expected_size)}
+        return response
+
+    def http_error(self, code):
+        return urllib.error.HTTPError(
+            prepare_flutter.PROFILE["engine"]["url"], code, "fixture error", None, None)
+
+    def assert_no_cached_or_partial_file(self):
+        self.assertFalse(self.archive.exists())
+        self.assertEqual(list(self.archive.parent.iterdir()), [])
+
+    def test_transient_http_error_retries_and_caches_only_validated_bytes(self):
+        for code in (408, 429, 500, 504):
+            with self.subTest(code=code):
+                self.download.reset_mock()
+                self.sleep.reset_mock()
+                self.download.side_effect = [self.http_error(code), self.response()]
+                result = prepare_flutter.fetch_engine_archive(self.archive)
+                self.assertEqual(result, self.archive)
+                self.assertEqual(result.read_bytes(), self.payload)
+                self.assertEqual(self.download.call_count, 2)
+                self.sleep.assert_called_once_with(2)
+                self.assertEqual(list(self.archive.parent.iterdir()), [self.archive])
+                self.archive.unlink()
+
+    def test_repeated_transient_errors_stop_after_four_attempts(self):
+        self.download.side_effect = self.http_error(504)
+        with self.assertRaises(urllib.error.HTTPError):
+            prepare_flutter.fetch_engine_archive(self.archive)
+        self.assertEqual(self.download.call_count, 4)
+        self.assertEqual(self.sleep.call_args_list, [call(2), call(4), call(8)])
+        self.assert_no_cached_or_partial_file()
+
+    def test_permanent_http_errors_do_not_retry(self):
+        for code in (400, 401, 403, 404):
+            with self.subTest(code=code):
+                self.download.reset_mock()
+                self.download.side_effect = self.http_error(code)
+                with self.assertRaises(urllib.error.HTTPError):
+                    prepare_flutter.fetch_engine_archive(self.archive)
+                self.download.assert_called_once()
+                self.sleep.assert_not_called()
+                self.assert_no_cached_or_partial_file()
+
+    def test_transport_interruptions_retry(self):
+        errors = [urllib.error.URLError(TimeoutError("timed out")),
+                  ConnectionResetError("connection reset"),
+                  http.client.IncompleteRead(b"partial", 100),
+                  urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, "try again")),
+                  ssl.SSLEOFError("unexpected EOF")]
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                self.download.reset_mock()
+                self.sleep.reset_mock()
+                self.download.side_effect = [error, self.response()]
+                prepare_flutter.fetch_engine_archive(self.archive)
+                self.assertEqual(self.archive.read_bytes(), self.payload)
+                self.assertEqual(self.download.call_count, 2)
+                self.sleep.assert_called_once_with(2)
+                self.archive.unlink()
+
+    def test_short_response_is_retried_before_hash_validation(self):
+        self.download.side_effect = [self.response(self.payload[:10], len(self.payload)),
+                                     self.response()]
+        prepare_flutter.fetch_engine_archive(self.archive)
+        self.assertEqual(self.archive.read_bytes(), self.payload)
+        self.assertEqual(self.download.call_count, 2)
+        self.sleep.assert_called_once_with(2)
+        self.assertEqual(list(self.archive.parent.iterdir()), [self.archive])
+
+    def test_bad_hash_does_not_retry_or_poison_the_cache(self):
+        self.download.return_value = self.response(self.payload + b"unreviewed bytes")
+        with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+            prepare_flutter.fetch_engine_archive(self.archive)
+        self.download.assert_called_once()
+        self.sleep.assert_not_called()
+        self.assert_no_cached_or_partial_file()
+
+    def test_malformed_archive_does_not_retry_even_with_matching_hash(self):
+        payload = b"not a ZIP archive"
+        self.download.return_value = self.response(payload)
+        with patch.dict(prepare_flutter.PROFILE["engine"],
+                        {"sha256": hashlib.sha256(payload).hexdigest()}):
+            with self.assertRaises(zipfile.BadZipFile):
+                prepare_flutter.fetch_engine_archive(self.archive)
+        self.download.assert_called_once()
+        self.sleep.assert_not_called()
+        self.assert_no_cached_or_partial_file()
+
+    def test_existing_cache_is_validated_and_never_silently_replaced(self):
+        self.archive.parent.mkdir()
+        self.archive.write_bytes(self.payload)
+        self.assertEqual(prepare_flutter.fetch_engine_archive(self.archive), self.archive)
+        self.archive.write_bytes(b"modified cached file")
+        with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+            prepare_flutter.fetch_engine_archive(self.archive)
+        self.assertEqual(self.archive.read_bytes(), b"modified cached file")
+        self.download.assert_not_called()
+        self.sleep.assert_not_called()
+
+    def test_certificate_verification_failure_does_not_retry(self):
+        self.download.side_effect = urllib.error.URLError(
+            ssl.SSLCertVerificationError("certificate verification failed"))
+        with self.assertRaises(urllib.error.URLError):
+            prepare_flutter.fetch_engine_archive(self.archive)
+        self.download.assert_called_once()
+        self.sleep.assert_not_called()
+        self.assert_no_cached_or_partial_file()
 
 
 class SourceArchiveTests(unittest.TestCase):

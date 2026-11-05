@@ -8,11 +8,16 @@ build is not ABI compatible.
 
 import argparse
 import hashlib
+import http.client
 import json
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import socket
+import ssl
 import tempfile
+import time
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -20,6 +25,7 @@ import zipfile
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 PROFILE = json.loads((HERE / "profile.json").read_text(encoding="utf-8"))
+ENGINE_DOWNLOAD_ATTEMPTS = 4
 IGNORED = {
     ".dart_tool", ".git", ".plugin_symlinks", ".symlinks", "build", "ephemeral",
     "Pods", ".flutter-plugins", ".flutter-plugins-dependencies",
@@ -167,25 +173,57 @@ def verify_archive(archive):
     return archive
 
 
-def install_engine(sdk, archive):
-    sdk = verify_sdk(sdk)
-    destination = sdk / "bin/cache/artifacts/engine/windows-x64-release"
-    if not destination.is_dir():
-        raise ValueError("Run flutter precache --windows before installing the custom engine")
+def transient_download_error(error):
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in (408, 429) or 500 <= error.code < 600
+    if isinstance(error, urllib.error.ContentTooShortError):
+        return True
+    if isinstance(error, urllib.error.URLError):
+        error = error.reason
+    if isinstance(error, socket.gaierror):
+        return error.errno == socket.EAI_AGAIN
+    return isinstance(error, (TimeoutError, ConnectionError,
+                              http.client.IncompleteRead, ssl.SSLEOFError))
+
+
+def fetch_engine_archive(archive):
+    """Cache only the reviewed archive; never retry a hash or archive failure."""
     archive = Path(archive).resolve()
-    if not archive.is_file():
-        archive.parent.mkdir(parents=True, exist_ok=True)
+    if archive.is_file():
+        return verify_archive(archive)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in range(1, ENGINE_DOWNLOAD_ATTEMPTS + 1):
         with tempfile.NamedTemporaryFile(dir=archive.parent, delete=False) as temporary:
             download = Path(temporary.name)
         try:
             with urllib.request.urlopen(PROFILE["engine"]["url"], timeout=60) as response:
                 with download.open("wb") as output:
                     shutil.copyfileobj(response, output)
+                    received = output.tell()
+                expected = response.headers.get("Content-Length")
+                if expected is not None and received < int(expected):
+                    raise urllib.error.ContentTooShortError(
+                        f"Engine download received {received} of {expected} bytes", None)
             verify_archive(download)
             download.replace(archive)
+            return archive
+        except (OSError, http.client.IncompleteRead) as error:
+            if attempt == ENGINE_DOWNLOAD_ATTEMPTS or not transient_download_error(error):
+                raise
+            delay = 2 ** attempt
+            print(f"Engine download attempt {attempt}/{ENGINE_DOWNLOAD_ATTEMPTS} "
+                  f"failed: {error}; retrying in {delay}s", flush=True)
         finally:
             download.unlink(missing_ok=True)
-    verify_archive(archive)
+        time.sleep(delay)
+
+
+def install_engine(sdk, archive):
+    sdk = verify_sdk(sdk)
+    destination = sdk / "bin/cache/artifacts/engine/windows-x64-release"
+    if not destination.is_dir():
+        raise ValueError("Run flutter precache --windows before installing the custom engine")
+    archive = fetch_engine_archive(archive)
     with zipfile.ZipFile(archive) as package:
         package.extractall(destination)
     return destination
@@ -194,14 +232,18 @@ def install_engine(sdk, archive):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path)
+    parser.add_argument("--prefetch-engine", action="store_true",
+                        help="Download and validate the pinned archive without changing the SDK")
     parser.add_argument("--install-engine", type=Path, metavar="FLUTTER_SDK")
     parser.add_argument("--engine-archive", type=Path,
                         default=ROOT / "target/windows7/windows-x64-release.zip")
     args = parser.parse_args()
-    if not args.workspace and not args.install_engine:
-        parser.error("Specify --workspace or --install-engine")
+    if not args.workspace and not args.prefetch_engine and not args.install_engine:
+        parser.error("Specify --workspace, --prefetch-engine or --install-engine")
     if args.workspace:
         print(prepare(args.workspace))
+    if args.prefetch_engine:
+        print(fetch_engine_archive(args.engine_archive))
     if args.install_engine:
         print(install_engine(args.install_engine, args.engine_archive))
 

@@ -163,6 +163,7 @@ def main():
     codegen_version = subprocess.check_output([codegen, "--version"], env=env, text=True).strip()
     if codegen_version != "flutter_rust_bridge_codegen " + CODEGEN_VERSION:
         parser.error("The installed FRB code generator must be version " + CODEGEN_VERSION)
+    prepare_flutter.fetch_engine_archive(args.engine_archive)
     if args.workspace.exists():
         metadata_file = args.workspace / "ui-compatibility.json"
         if not metadata_file.is_file():
