@@ -4,8 +4,9 @@
 Windows 7 SP1 **64 位**及更新的 Windows 系统使用同一套局域网客户端。
 保留项目原有的 IP 直连、局域网发现和远程桌面逻辑。
 
-**当前交付状态：Win7 兼容候选构建，尚未完成 Win7 真机验收。**
-Windows 编译状态以本仓库 Actions 的实际运行结果为准。
+**当前交付状态：Windows 构建成功，候选 ZIP 已上传；尚未进行 Win7、Win10、Win11 实机测试。**
+[Actions 构建 #5](https://github.com/longtutengfei/rustdesk-lan-win7/actions/runs/42048983180)
+已完成 Windows 编译、链接和 PE 预检，产物仍是待实机验收的 Win7 兼容候选包。
 不能把源码检查、依赖解析或 PE 导入检查通过当作已经验证支持 Win7。
 本次不包含 XP、Server 2003、Win7 32 位的适配。
 
@@ -78,6 +79,9 @@ IP 直连，需要在设置中重新开启。程序不会因为是局域网版�
 本仓库的构建记录可在
 [Windows 7 Actions 工作流](https://github.com/longtutengfei/rustdesk-lan-win7/actions/workflows/windows7-build.yml)
 查看。以成功运行生成的候选包及其中的来源记录为准。
+
+工作流在编译前下载并校验固定的兼容引擎，随后缓存已验证的归档。缓存命中
+仍会重新校验 SHA-256 和归档内容，最终打包时再检查引擎未被 Flutter 替换。
 
 ## 本地 Windows 构建
 
@@ -207,21 +211,32 @@ Win10/11 的 DLL 得到虚假的 Win7 结论。不要把参考目录的系统 DL
 ## 本次实际验证记录（2026-11-05）
 
 源码准备和依赖分析在 Linux 上执行，Windows 检查与编译由本仓库 Actions
-执行。已取得以下结果：
+执行。[构建 #5](https://github.com/longtutengfei/rustdesk-lan-win7/actions/runs/42048983180)
+已成功，构建源码提交为 `4f8136ea2b93bef6a39a922b895da3fe956f4fc3`。
+下载后已核对候选程序包 `rustdesk-lan-1.5.0-windows7-x64-candidate.zip`
+的 SHA-256 与该次构建的来源记录一致：
+
+```text
+39b470bb629082a7bc632c85a9b96d0133b9cbf168a36000b0039e6eee5e1da0
+```
+
+此校验值对应候选程序包本身，不是 GitHub artifact 的外层 ZIP。
+已取得以下结果：
 
 | 检查 | 结果 | 能说明的范围 |
 | --- | --- | --- |
 | Rust 1.75.0、Windows target 的锁定依赖解析 | 通过 | Win7 配置中有 572 个可达包，toast 依赖已移除；默认配置仍保留 toast |
-| 已声明 MSRV 的依赖 | 均不高于 1.75 | 另有 283 个包未声明 MSRV，仍需实际编译 |
+| 已声明 MSRV 的依赖 | 均不高于 1.75 | 另有 283 个包未声明 MSRV；本次已使用 Rust 1.75.0 通过 Windows 原生 release 编译 |
 | Flutter 3.24.5 / Dart 3.5.4 的依赖解析 | 通过 | 独立锁文件可用 |
 | 新隔离副本中强制锁定的离线依赖解析 | 通过 | 已下载缓存可重现解析，锁文件未被改写 |
 | 原版 FRB codegen 1.80.1 与 Freezed 生成 | 通过 | 完整桥接代码生成成功 |
 | 完整 Dart `lib` 分析 | 通过 | 0 个 error，0 个 warning，117 个现有 info 级提示 |
-| UI 隔离、引擎验证、CMake 交接、PE 检查器测试 | Linux 和 Windows 均为 28 项通过 | 验证构建工具的相应行为，不代表应用通过 Win7 测试 |
+| UI 隔离、引擎下载/验证、CMake 交接、PE 检查器测试 | Windows 上 39 项通过 | 准备/下载测试 16 项，CMake/PE 测试 23 项；验证构建工具行为，不代表应用通过 Win7 实机测试 |
 | 实际下载的兼容引擎 PE 预检 | 2 个 PE、0 个错误、0 个警告 | 仅引擎 DLL 与 `gen_snapshot.exe`，无 Win7 系统参考，状态为 `preflight-only` |
 | 工作流 YAML 解析、`git diff --check` | 通过 | 配置可解析，无补丁空白错误 |
-| 整个 Windows 应用编译、链接 | 构建 #2 已通过，提交 `4e76113` | Rust 原生库和 Flutter Windows EXE 均已生成；后续改动须由新构建复验 |
-| 最终运行目录的 PE 导入检查 | 已执行，发现两处系统 DLL 分类遗漏 | 已补充 Sas.dll / Newdev.dll 的识别及回归测试，等待新构建复验 |
+| 整个 Windows 应用编译、链接 | 构建 #5 通过 | Rust 原生 release 库与 Flutter Windows EXE 均已编译、链接成功 |
+| 最终完整运行目录的 PE 导入检查 | 13 个 PE、0 个错误、0 个警告 | 未使用 Win7 系统参考 DLL 集，结果为 `preflight-only`；不能证明已通过 Win7 运行验收 |
+| 候选 ZIP artifact 上传 | 构建 #5 成功 | 完整候选程序 ZIP 已上传至该次 Actions 运行，可下载后进行离线实机测试 |
 | Win7 / Win10 / Win11 实机远控 | 未执行 | 尚无启动、IP 直连、画面传输的实机结论 |
 
 工作流固定了 Rust、Flutter、引擎和依赖版本，但 Windows 2022 runner 中的
