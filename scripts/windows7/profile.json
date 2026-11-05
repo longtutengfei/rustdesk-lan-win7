@@ -1,0 +1,45 @@
+{
+  "flutter_version": "3.24.5",
+  "flutter_revision": "dec2ee5c1f98f8e84a7d5380c05eb8a3d0a81668",
+  "dart_version": "3.5.4",
+  "rust_toolchain": "1.75.0",
+  "rust_target": "x86_64-pc-windows-msvc",
+  "architecture": "x64",
+  "minimum_os": "Windows 7 SP1 x64",
+  "engine": {
+    "url": "https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip",
+    "asset_id": 210168939,
+    "sha256": "ec8cabf36ee4ff24c8d98de25b00e70781eb03876265aee84d0fe554a110036e",
+    "source_workflow": "https://github.com/rustdesk/engine/blob/9176a596b1f82625dfe8831edbcc4f2c9dc22da9/.github/workflows/flutter-engine-windows-x64-release-build.yml"
+  },
+  "dependencies": {
+    "wakelock_plus": "1.2.1",
+    "package_info_plus": "4.2.0",
+    "file_picker": "5.5.0",
+    "device_info_plus": "9.1.2",
+    "sqflite": "2.2.0",
+    "google_fonts": "6.2.1",
+    "win32": "5.10.1",
+    "dash_chat_2": {
+      "git": {
+        "url": "https://github.com/rustdesk-org/Dash-Chat-2",
+        "ref": "bd6b5b41254e57c5bcece202ebfb234de63e6487"
+      }
+    },
+    "desktop_multi_window": {
+      "git": {
+        "url": "https://github.com/rustdesk-org/rustdesk_desktop_multi_window",
+        "ref": "b47e8385e5a75d38319ad706a64b0ead3108b093"
+      }
+    },
+    "window_manager": {
+      "git": {
+        "url": "https://github.com/rustdesk-org/window_manager",
+        "ref": "85789bfe6e4cfaf4ecc00c52857467fdb7f26879"
+      }
+    }
+  },
+  "dependency_overrides": {
+    "flutter_plugin_android_lifecycle": "2.0.17"
+  }
+}

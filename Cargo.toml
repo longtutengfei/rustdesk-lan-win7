@@ -27,7 +27,11 @@ use_samplerate = ["samplerate"]
 use_rubato = ["rubato"]
 use_dasp = ["dasp"]
 flutter = ["flutter_rust_bridge"]
-default = ["use_dasp", "flutter"]
+default = ["use_dasp", "flutter", "windows-toast"]
+# WinRT notifications are unavailable on Windows 7. The compatibility build
+# explicitly selects its features with --no-default-features.
+windows-toast = ["dep:tauri-winrt-notification"]
+windows7 = []
 hwcodec = ["scrap/hwcodec"]
 vram = ["scrap/vram"]
 mediacodec = ["scrap/mediacodec"]
@@ -141,7 +145,7 @@ virtual_display = { path = "libs/virtual_display" }
 remote_printer = { path = "libs/remote_printer" }
 impersonate_system = { git = "https://github.com/rustdesk-org/impersonate-system" }
 shared_memory = "0.12"
-tauri-winrt-notification = "0.1"
+tauri-winrt-notification = { version = "0.1", optional = true }
 runas = "1.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]

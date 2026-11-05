@@ -65,13 +65,35 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 
 # Build the Rust bridge library so `flutter build windows` can run without
 # requiring the outer Python build wrapper first.
+# A compatibility UI build can use a separately built, pinned Rust library.
+# Environment variables allow Flutter's CMake invocation to pass these paths
+# without depending on Flutter exposing arbitrary CMake command-line options.
+set(RUSTDESK_PREBUILT_LIB "$ENV{RUSTDESK_PREBUILT_LIB}" CACHE FILEPATH
+  "Optional prebuilt librustdesk.dll for a separate Flutter build directory")
+set(RUSTDESK_PREBUILT_VIRTUAL_DISPLAY_LIB
+  "$ENV{RUSTDESK_PREBUILT_VIRTUAL_DISPLAY_LIB}" CACHE FILEPATH
+  "Optional virtual display DLL accompanying RUSTDESK_PREBUILT_LIB")
 set(RUSTDESK_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../..")
-add_custom_target(build_rustdesk_lib ALL
-  COMMAND cargo build --features flutter --lib $<$<NOT:$<CONFIG:Debug>>:--release>
-  WORKING_DIRECTORY "${RUSTDESK_ROOT_DIR}"
-  COMMENT "Building RustDesk Flutter bridge library"
-  VERBATIM
-)
+if(RUSTDESK_PREBUILT_LIB)
+  if(NOT IS_ABSOLUTE "${RUSTDESK_PREBUILT_LIB}" OR
+     NOT EXISTS "${RUSTDESK_PREBUILT_LIB}" OR
+     IS_DIRECTORY "${RUSTDESK_PREBUILT_LIB}")
+    message(FATAL_ERROR "RUSTDESK_PREBUILT_LIB must name an existing absolute DLL path")
+  endif()
+  if(RUSTDESK_PREBUILT_VIRTUAL_DISPLAY_LIB AND
+     (NOT IS_ABSOLUTE "${RUSTDESK_PREBUILT_VIRTUAL_DISPLAY_LIB}" OR
+      NOT EXISTS "${RUSTDESK_PREBUILT_VIRTUAL_DISPLAY_LIB}" OR
+      IS_DIRECTORY "${RUSTDESK_PREBUILT_VIRTUAL_DISPLAY_LIB}"))
+    message(FATAL_ERROR "RUSTDESK_PREBUILT_VIRTUAL_DISPLAY_LIB must name an existing absolute DLL path")
+  endif()
+else()
+  add_custom_target(build_rustdesk_lib ALL
+    COMMAND cargo build --features flutter --lib $<$<NOT:$<CONFIG:Debug>>:--release>
+    WORKING_DIRECTORY "${RUSTDESK_ROOT_DIR}"
+    COMMENT "Building RustDesk Flutter bridge library"
+    VERBATIM
+  )
+endif()
 
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
@@ -113,12 +135,19 @@ endif()
 # flutter_rust_bridge
 set(RUSTDESK_LIB_BUILD_TYPE $<IF:$<CONFIG:Debug>,debug,release>)
 message(STATUS "rustdesk lib build type: ${RUSTDESK_LIB_BUILD_TYPE}")
-set(RUSTDESK_LIB "../../target/${RUSTDESK_LIB_BUILD_TYPE}/librustdesk.dll")
+if(RUSTDESK_PREBUILT_LIB)
+  set(RUSTDESK_LIB "${RUSTDESK_PREBUILT_LIB}")
+  set(RUSTDESK_VIRTUAL_DISPLAY_LIB "${RUSTDESK_PREBUILT_VIRTUAL_DISPLAY_LIB}")
+else()
+  set(RUSTDESK_LIB "../../target/${RUSTDESK_LIB_BUILD_TYPE}/librustdesk.dll")
+  set(RUSTDESK_VIRTUAL_DISPLAY_LIB "../../target/${RUSTDESK_LIB_BUILD_TYPE}/deps/dylib_virtual_display.dll")
+endif()
 install(FILES "${RUSTDESK_LIB}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
 COMPONENT Runtime RENAME librustdesk.dll)
-set(RUSTDESK_VIRTUAL_DISPLAY_LIB "../../target/${RUSTDESK_LIB_BUILD_TYPE}/deps/dylib_virtual_display.dll")
-install(FILES "${RUSTDESK_VIRTUAL_DISPLAY_LIB}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-  COMPONENT Runtime OPTIONAL)
+if(RUSTDESK_VIRTUAL_DISPLAY_LIB)
+  install(FILES "${RUSTDESK_VIRTUAL_DISPLAY_LIB}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime OPTIONAL)
+endif()
 
 # Fully re-copy the assets directory on each build to avoid having stale files
 # from a previous install.

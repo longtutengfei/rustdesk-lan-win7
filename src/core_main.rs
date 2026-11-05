@@ -7,8 +7,42 @@ use crate::platform::breakdown_callback;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use hbb_common::platform::register_breakdown_handler;
 use hbb_common::{config, log};
-#[cfg(windows)]
+#[cfg(all(windows, feature = "windows-toast"))]
 use tauri_winrt_notification::{Duration, Sound, Toast};
+
+#[cfg(all(windows, feature = "windows7", feature = "windows-toast"))]
+compile_error!("windows7 cannot include WinRT notifications; use --no-default-features --features use_dasp,flutter,windows7");
+
+#[cfg(windows)]
+fn show_windows_install_result(text: &str, _silent: bool) {
+    #[cfg(feature = "windows-toast")]
+    {
+        let app_name = config::APP_NAME
+            .read()
+            .map(|name| name.clone())
+            .unwrap_or_else(|_| "RustDesk LAN".to_owned());
+        if let Err(err) = Toast::new(Toast::POWERSHELL_APP_ID)
+            .title(&app_name)
+            .text1(text)
+            .sound(Some(Sound::Default))
+            .duration(Duration::Short)
+            .show()
+        {
+            log::warn!("Failed to show installation notification: {}", err);
+        }
+    }
+    #[cfg(not(feature = "windows-toast"))]
+    {
+        log::info!("{}", text);
+        if _silent {
+            // An unattended install must not wait for a modal dialog.
+            println!("{}", text);
+        } else {
+            // Uses MessageBoxW, which is available on Windows 7.
+            crate::platform::message_box(text);
+        }
+    }
+}
 
 #[macro_export]
 macro_rules! my_println{
@@ -220,13 +254,7 @@ pub fn core_main() -> Option<Vec<String>> {
                         }
                     },
                 };
-                Toast::new(Toast::POWERSHELL_APP_ID)
-                    .title(&config::APP_NAME.read().unwrap())
-                    .text1(&translate(text))
-                    .sound(Some(Sound::Default))
-                    .duration(Duration::Short)
-                    .show()
-                    .ok();
+                show_windows_install_result(&translate(text), false);
                 return None;
             } else if args[0] == "--after-install" {
                 if let Err(err) = platform::run_after_install() {
@@ -254,13 +282,7 @@ pub fn core_main() -> Option<Vec<String>> {
                         translate("Installation failed!".to_string())
                     }
                 };
-                Toast::new(Toast::POWERSHELL_APP_ID)
-                    .title(&config::APP_NAME.read().unwrap())
-                    .text1(&text)
-                    .sound(Some(Sound::Default))
-                    .duration(Duration::Short)
-                    .show()
-                    .ok();
+                show_windows_install_result(&text, true);
                 return None;
             } else if args[0] == "--uninstall-cert" {
                 #[cfg(windows)]

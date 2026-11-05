@@ -78,6 +78,15 @@ fn install_android_deps() {
 }
 
 fn main() {
+    // Apply this cfg to every target crate via the dedicated build's
+    // RUSTFLAGS, not cargo:rustc-cfg (which would miss windows-result).
+    if std::env::var_os("CARGO_FEATURE_WINDOWS7").is_some()
+        && std::env::var("CARGO_CFG_TARGET_OS").ok().as_deref() == Some("windows")
+        && std::env::var_os("CARGO_CFG_WINDOWS_SLIM_ERRORS").is_none()
+    {
+        eprintln!("The windows7 feature requires target RUSTFLAGS: -Ctarget-feature=+crt-static --cfg windows_slim_errors");
+        std::process::exit(1);
+    }
     hbb_common::gen_version();
     install_android_deps();
     #[cfg(all(windows, feature = "inline"))]

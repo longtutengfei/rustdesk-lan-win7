@@ -1,0 +1,131 @@
+name: Build Windows 7 LAN compatibility candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustdesk-lan-windows7-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.24.5"
+  RUST_VERSION: "1.75.0"
+  VCPKG_COMMIT: "120deac3062162151622ca4860575a33844ba10b"
+  # These official switches also prevent Flutter's Azure metadata detection.
+  BOT: "true"
+  CI: "true"
+  FLUTTER_SUPPRESS_ANALYTICS: "true"
+  DART_SUPPRESS_ANALYTICS: "true"
+  CARGO_BUILD_JOBS: "4"
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+
+jobs:
+  windows7-x64:
+    runs-on: windows-2022
+    timeout-minutes: 150
+    env:
+      VCPKG_ROOT: C:\vcpkg-rustdesk-lan-win7
+      VCPKG_INSTALLED_ROOT: C:\vcpkg-rustdesk-lan-win7\installed
+      VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the selected source revision
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          submodules: recursive
+
+      - name: Set up the x64 MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c
+        with:
+          arch: x64
+
+      - name: Install LLVM for Rust bindings and Flutter Rust Bridge
+        uses: KyleMayes/install-llvm-action@ebc0426251bc40c7cd31162802432c68818ab8f0
+        with:
+          version: "15.0.6"
+          directory: C:\llvm-rustdesk-lan-win7
+          env: false
+
+      - name: Install Flutter matching the pinned Win7 engine
+        id: flutter
+        uses: subosito/flutter-action@2783a3f08e1baf891508463f8c6653c258246225
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          architecture: x64
+          cache: false
+
+      - name: Install the pinned Rust compiler and formatter
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - name: Cache the verified custom engine archive
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: target/windows7/windows-x64-release.zip
+          key: rustdesk-lan-win7-engine-${{ hashFiles('scripts/windows7/profile.json') }}
+
+      - name: Install bridge generator and PE audit dependencies
+        run: |
+          cargo +1.75.0 install flutter_rust_bridge_codegen --version 1.80.1 --features uuid --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Flutter Rust Bridge generator installation failed' }
+          python -m pip install pefile==2024.8.26
+          if ($LASTEXITCODE -ne 0) { throw 'PE parser installation failed' }
+          choco install nasm --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'NASM installation failed' }
+          'C:\Program Files\NASM' >> $env:GITHUB_PATH
+
+      - name: Verify preparation, CMake integration, and PE audit checks
+        run: |
+          python -m unittest discover -s scripts/windows7 -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { throw 'Windows 7 isolated UI and engine verification tests failed' }
+          python -m unittest discover -s tests -p 'test_windows7*.py'
+          if ($LASTEXITCODE -ne 0) { throw 'Windows 7 compatibility tooling tests failed' }
+
+      - name: Build the isolated software codec dependencies
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git init $env:VCPKG_ROOT
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg initialization failed' }
+          git -C $env:VCPKG_ROOT remote add origin https://github.com/microsoft/vcpkg
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg remote configuration failed' }
+          git -C $env:VCPKG_ROOT fetch --depth 1 origin $env:VCPKG_COMMIT
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned vcpkg revision fetch failed' }
+          git -C $env:VCPKG_ROOT checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned vcpkg checkout failed' }
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
+          & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows-static --x-manifest-root="$pwd/scripts/windows7" --overlay-triplets="$pwd/scripts/windows7/triplets" --overlay-ports="$pwd/res/vcpkg" --x-install-root="$env:VCPKG_INSTALLED_ROOT"
+          if ($LASTEXITCODE -ne 0) { throw 'Win7 software codec dependency build failed' }
+
+      - name: Build the compatibility runtime and audit all packaged PE files
+        run: |
+          python scripts/windows7/build.py --flutter-sdk "${{ steps.flutter.outputs['CACHE-PATH'] }}"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows 7 candidate build or PE preflight failed' }
+
+      - name: Preserve compatibility diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rustdesk-lan-windows7-x64-diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            target/windows7/dist/*.json
+            target/windows7/build/ui-compatibility.json
+
+      - name: Upload the unsigned candidate for real Windows 7 testing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rustdesk-lan-windows7-x64-candidate
+          if-no-files-found: error
+          retention-days: 30
+          path: target/windows7/dist/*.zip

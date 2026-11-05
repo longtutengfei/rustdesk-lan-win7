@@ -55,6 +55,18 @@ RustDesk welcomes contribution from everyone. See [CONTRIBUTING.md](docs/CONTRIB
 
 Desktop GUI now uses Flutter only.
 
+### Windows 7 SP1 x64 compatibility build
+
+A separate, pinned compatibility profile is available in
+[`scripts/windows7/`](scripts/windows7/). It targets Windows 7 SP1 x64 and newer
+Windows versions while retaining the LAN-only connection behavior. The ordinary
+build does not select this profile automatically.
+
+See [Windows 7 build and validation notes (中文)](docs/WINDOWS7.zh-CN.md) for the
+manual GitHub Actions workflow and local Windows build instructions. This is a
+compatibility candidate: a successful build or PE import check alone does not
+establish that it has passed Windows 7 runtime tests.
+
 ## Raw Steps to build
 
 - Prepare your Rust development env and C++ build env
