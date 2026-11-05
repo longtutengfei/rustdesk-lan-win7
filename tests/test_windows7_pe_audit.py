@@ -207,6 +207,51 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(report["status"], "preflight-only")
         self.assertIn("bcryptprimitives.dll", report["unverified_system_dlls"])
 
+    def test_win7_sas_and_driver_imports_remain_unverified_in_preflight(self):
+        make_pe(self.package / "librustdesk.dll", imports=[
+            ("Sas.dll", ["SendSAS"]),
+            ("Newdev.dll", ["UpdateDriverForPlugAndPlayDevicesW"]),
+        ])
+        report = audit_pe.audit(self.package)
+        self.assertEqual(report["error_count"], 0, report["issues"])
+        self.assertEqual(report["status"], "preflight-only")
+        self.assertEqual(report["unverified_system_dlls"], ["newdev.dll", "sas.dll"])
+        self.assertTrue(all(item["status"] == "unverified-system" for item in report["imports"]))
+
+        make_pe(self.package / "plugin.dll", imports=[("missing-plugin-runtime.dll", ["Init"])])
+        report = audit_pe.audit(self.package)
+        self.assertEqual(report["error_count"], 1, report["issues"])
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(self.codes(report), {"missing-dll"})
+        self.assertIn("missing-plugin-runtime.dll", report["issues"][0]["detail"])
+
+    def test_win7_sas_and_driver_imports_require_reference_dlls_and_exports(self):
+        imports = [
+            ("sas.dll", ["SendSAS"]),
+            ("newdev.dll", ["UpdateDriverForPlugAndPlayDevicesW"]),
+        ]
+        make_pe(self.package / "librustdesk.dll", imports=imports)
+        system = self.reference()
+        report = audit_pe.audit(self.package, system_dir=system)
+        self.assertEqual(report["error_count"], 2, report["issues"])
+        self.assertEqual(self.codes(report), {"unresolved-reference"})
+        self.assertEqual(report["unverified_system_dlls"], [])
+
+        for dll, _symbols in imports:
+            make_pe(system / dll, exports=[(1, "OtherExport", None)])
+        report = audit_pe.audit(self.package, system_dir=system)
+        self.assertEqual(report["error_count"], 2, report["issues"])
+        self.assertEqual(self.codes(report), {"missing-export"})
+        self.assertEqual(report["unverified_system_dlls"], [])
+
+        for dll, symbols in imports:
+            make_pe(system / dll, exports=[(1, symbols[0], None)])
+        report = audit_pe.audit(self.package, system_dir=system)
+        self.assertEqual(report["error_count"], 0, report["issues"])
+        self.assertEqual(report["status"], "reference-checked")
+        self.assertEqual(report["unverified_system_dlls"], [])
+        self.assertTrue(all(item["status"] == "resolved" for item in report["imports"]))
+
     def test_processprng_is_rejected_as_missing_api_not_missing_dll(self):
         make_pe(self.package / "app.exe", imports=[("bcryptprimitives.dll", ["ProcessPrng"])])
         self.assertIn("post-win7-api", self.codes(audit_pe.audit(self.package)))

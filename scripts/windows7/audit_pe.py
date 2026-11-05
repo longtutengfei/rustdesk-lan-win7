@@ -31,6 +31,9 @@ WIN7_VERSION = (6, 1)
 
 # This list recognizes common OS DLL names; it is NOT an export allowlist or a
 # proof of compatibility. Real export validation requires --system-dir.
+# Windows 7 supports the SAS and driver-installation APIs used by RustDesk:
+# https://learn.microsoft.com/windows/win32/api/sas/nf-sas-sendsas
+# https://learn.microsoft.com/windows/win32/api/newdev/nf-newdev-updatedriverforplugandplaydevicesw
 SYSTEM_DLLS = set("""
 advapi32.dll avicap32.dll avrt.dll bcrypt.dll bcryptprimitives.dll cabinet.dll cfgmgr32.dll
 comctl32.dll comdlg32.dll credui.dll crypt32.dll cryptbase.dll cryptnet.dll
@@ -39,9 +42,9 @@ dciman32.dll dnsapi.dll dsound.dll dwmapi.dll dwrite.dll dxgi.dll dxva2.dll
 gdi32.dll glu32.dll hid.dll imagehlp.dll imm32.dll iphlpapi.dll kernel32.dll
 kernelbase.dll mf.dll mfplat.dll mfreadwrite.dll mfuuid.dll mmdevapi.dll
 mpr.dll msacm32.dll msasn1.dll mscms.dll msimg32.dll msvcrt.dll ncrypt.dll
-netapi32.dll normaliz.dll nsi.dll ntdll.dll ole32.dll oleacc.dll oleaut32.dll
+netapi32.dll newdev.dll normaliz.dll nsi.dll ntdll.dll ole32.dll oleacc.dll oleaut32.dll
 opengl32.dll pdh.dll powrprof.dll propsys.dll psapi.dll rasapi32.dll
-rpcrt4.dll secur32.dll sechost.dll sensapi.dll setupapi.dll shell32.dll
+rpcrt4.dll sas.dll secur32.dll sechost.dll sensapi.dll setupapi.dll shell32.dll
 shlwapi.dll slc.dll spoolss.dll sspicli.dll sxs.dll uiautomationcore.dll
 urlmon.dll user32.dll userenv.dll usp10.dll uxtheme.dll version.dll
 wevtapi.dll wer.dll winhttp.dll wininet.dll winmm.dll winspool.drv

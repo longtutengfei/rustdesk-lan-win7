@@ -220,8 +220,8 @@ Win10/11 的 DLL 得到虚假的 Win7 结论。不要把参考目录的系统 DL
 | UI 隔离、引擎验证、CMake 交接、PE 检查器测试 | Linux 和 Windows 均为 28 项通过 | 验证构建工具的相应行为，不代表应用通过 Win7 测试 |
 | 实际下载的兼容引擎 PE 预检 | 2 个 PE、0 个错误、0 个警告 | 仅引擎 DLL 与 `gen_snapshot.exe`，无 Win7 系统参考，状态为 `preflight-only` |
 | 工作流 YAML 解析、`git diff --check` | 通过 | 配置可解析，无补丁空白错误 |
-| 整个 Windows 应用编译、链接 | 正在运行 Windows CI | 音视频依赖已通过；完整程序仍需构建成功 |
-| 最终运行目录的 PE 导入检查 | 未执行 | 需要先生成 Windows 程序包 |
+| 整个 Windows 应用编译、链接 | 构建 #2 已通过，提交 `4e76113` | Rust 原生库和 Flutter Windows EXE 均已生成；后续改动须由新构建复验 |
+| 最终运行目录的 PE 导入检查 | 已执行，发现两处系统 DLL 分类遗漏 | 已补充 Sas.dll / Newdev.dll 的识别及回归测试，等待新构建复验 |
 | Win7 / Win10 / Win11 实机远控 | 未执行 | 尚无启动、IP 直连、画面传输的实机结论 |
 
 工作流固定了 Rust、Flutter、引擎和依赖版本，但 Windows 2022 runner 中的
