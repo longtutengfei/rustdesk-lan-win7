@@ -4,9 +4,10 @@
 Windows 7 SP1 **64 位**及更新的 Windows 系统使用同一套局域网客户端。
 保留项目原有的 IP 直连、局域网发现和远程桌面逻辑。
 
-**当前状态：首个候选包已收到连接后黑屏的实测反馈；下述首帧恢复修复仍需 Windows 构建及实机回归。**
-[Actions 构建 #5](https://github.com/longtutengfei/rustdesk-lan-win7/actions/runs/42048983180)
-已完成 Windows 编译、链接和 PE 预检，产物仍是待实机验收的 Win7 兼容候选包。
+**当前状态：首帧恢复修复已完成 Windows 构建，修复包仍需两端实机回归。**
+[Actions 构建 #6](https://github.com/longtutengfei/rustdesk-lan-win7/actions/runs/42165177919)
+已完成 Windows 编译、链接和 PE 预检；首个候选包曾收到连接后黑屏的反馈，
+目前尚未通过用户两端日志确认其具体原因，也尚未完成修复包的实机画面验收。
 不能把源码检查、依赖解析或 PE 导入检查通过当作已经验证支持 Win7。
 本次不包含 XP、Server 2003、Win7 32 位的适配。
 
@@ -22,8 +23,8 @@ Windows 7 SP1 **64 位**及更新的 Windows 系统使用同一套局域网客�
   切换到 GDI。成功取得首帧之后，静态桌面不更新仍按正常情况处理。
 
 这两个修补不等于已经证明用户的全部黑屏原因。原构建 #5 的 ZIP 不包含
-本节修补；测试时需使用包含修补的另一次成功构建，并查看包内
-`build-provenance.json` 的 `source_commit`。
+本节修补。修复包来自构建 #6，包内 `build-provenance.json` 的
+`source_commit` 为 `443fdfcd6e26c30e430ddd5ce99daa9845debb93`。
 
 定位仍需两台电脑同一次连接的日志。复现后，在每台电脑用“运行”打开
 `%APPDATA%\RustDesk-lan\log`，保留整个目录及子目录，并区分控制端和被控端。
@@ -232,7 +233,34 @@ Win10/11 的 DLL 得到虚假的 Win7 结论。不要把参考目录的系统 DL
 连接方向及是否本地登录/锁屏的信息。这时应定位捕获、编码、传输还是解码
 没有产出，不能仅凭网络连接成功判断显示链路正常。
 
-## 本次实际验证记录（2026-11-05）
+## 首帧修复验证记录（2026-11-06）
+
+[构建 #6](https://github.com/longtutengfei/rustdesk-lan-win7/actions/runs/42165177919)
+成功生成完整 Windows x64 修复候选包，源码提交为
+`443fdfcd6e26c30e430ddd5ce99daa9845debb93`。下载后已核对来源记录，
+确认包内原生库包含纹理注册补帧和便携采集首帧回退的新增代码标记。
+
+程序 ZIP 为 29,237,288 字节、93 个条目，SHA-256 为：
+
+```text
+8a32d6bd9fead7bbbcddbf16f8c0e1f0f56d750789891e82a63e6e6966cd2b6a
+```
+
+此校验值对应程序 ZIP 本身。已核对它与构建诊断 artifact 中的来源记录
+一致，且源码工作区标记为无已跟踪文件改动。
+
+| 验证 | 结果 | 范围 |
+| --- | --- | --- |
+| 首帧注册及补帧逻辑 | 修复前 4 项通过、3 项失败；修复后 7 项全部通过 | Linux 上用 Rust 1.75 直接提取、编译两提交的实际生产方法；仅会话注册表和刷新发送接口使用替身。覆盖先收帧后注册、替换/重复/释放纹理、多屏、软件显示和无对应会话，发送时也检查相关锁已释放 |
+| Windows 构建工具检查 | 39 项通过 | 16 项准备/下载检查及 23 项 CMake/PE 检查；不是远程桌面实测 |
+| Rust 核心与 Flutter Windows 程序 | 编译及链接通过 | 构建使用既有 Win7 兼容配置 |
+| 完整运行目录 PE 预检 | 13 个 PE，0 个错误、0 个警告 | `preflight-only`，未使用真实 Win7 系统参考 DLL 集 |
+| 修复包两端画面、输入及重连 | 待实测 | 尚不能宣称用户机器上的黑屏已解决 |
+
+GitHub Actions 另有关于旧版 action 使用 Node.js 20 的弃用提示，不属于
+程序的 PE 预检错误；此次构建与 artifact 上传均成功。
+
+## 首个候选包验证记录（2026-11-05，历史记录）
 
 源码准备和依赖分析在 Linux 上执行，Windows 检查与编译由本仓库 Actions
 执行。[构建 #5](https://github.com/longtutengfei/rustdesk-lan-win7/actions/runs/42048983180)
