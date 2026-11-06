@@ -283,6 +283,8 @@ struct DisplaySessionInfo {
 struct VideoRenderer {
     is_support_multi_ui_session: bool,
     map_display_sessions: Arc<RwLock<HashMap<usize, DisplaySessionInfo>>>,
+    // Log a missing texture once per display until a frame can be submitted.
+    missing_pixelbuffer_displays: Arc<RwLock<HashSet<usize>>>,
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     on_rgba_func: Option<Symbol<'static, FlutterRgbaRendererPluginOnRgba>>,
     #[cfg(feature = "vram")]
@@ -334,6 +336,7 @@ impl Default for VideoRenderer {
 
         Self {
             map_display_sessions: Default::default(),
+            missing_pixelbuffer_displays: Default::default(),
             is_support_multi_ui_session: false,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             on_rgba_func,
@@ -364,8 +367,12 @@ impl VideoRenderer {
         }
     }
 
-    fn register_pixelbuffer_texture(&self, display: usize, ptr: usize) {
+    fn register_pixelbuffer_texture(&self, display: usize, ptr: usize) -> bool {
         let mut sessions_lock = self.map_display_sessions.write().unwrap();
+        let texture_changed = ptr != 0
+            && sessions_lock
+                .get(&display)
+                .map_or(true, |info| info.texture_rgba_ptr != ptr);
         if ptr == 0 {
             if let Some(info) = sessions_lock.get_mut(&display) {
                 if info.texture_rgba_ptr != usize::default() {
@@ -373,7 +380,7 @@ impl VideoRenderer {
                 }
                 #[cfg(feature = "vram")]
                 if info.gpu_output_ptr != usize::default() {
-                    return;
+                    return false;
                 }
             }
             sessions_lock.remove(&display);
@@ -405,6 +412,7 @@ impl VideoRenderer {
                 }
             }
         }
+        texture_changed
     }
 
     #[cfg(feature = "vram")]
@@ -448,6 +456,20 @@ impl VideoRenderer {
     }
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    fn log_pixelbuffer_not_ready(&self, display: usize) {
+        if self
+            .missing_pixelbuffer_displays
+            .write()
+            .unwrap()
+            .insert(display)
+        {
+            log::debug!(
+                "Decoded video for display #{display} is waiting for pixelbuffer texture registration"
+            );
+        }
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn on_rgba(&self, display: usize, rgba: &scrap::ImageRgb) -> bool {
         let mut write_lock = self.map_display_sessions.write().unwrap();
         let opt_info = if !self.is_support_multi_ui_session {
@@ -456,9 +478,11 @@ impl VideoRenderer {
             write_lock.get_mut(&display)
         };
         let Some(info) = opt_info else {
+            self.log_pixelbuffer_not_ready(display);
             return false;
         };
         if info.texture_rgba_ptr == usize::default() {
+            self.log_pixelbuffer_not_ready(display);
             return false;
         }
 
@@ -487,6 +511,16 @@ impl VideoRenderer {
                     rgba.align() as _,
                 )
             };
+            if self
+                .missing_pixelbuffer_displays
+                .write()
+                .unwrap()
+                .remove(&display)
+            {
+                log::info!(
+                    "Submitted decoded video for display #{display} after pixelbuffer texture registration"
+                );
+            }
         }
         if info.notify_render_type != Some(RenderType::PixelBuffer) {
             info.notify_render_type = Some(RenderType::PixelBuffer);
@@ -1756,16 +1790,27 @@ pub fn session_set_size(session_id: SessionID, display: usize, width: usize, hei
 #[inline]
 pub fn session_register_pixelbuffer_texture(session_id: SessionID, display: usize, ptr: usize) {
     for s in sessions::get_sessions() {
-        if let Some(h) = s
-            .ui_handler
-            .session_handlers
-            .read()
-            .unwrap()
-            .get(&session_id)
-        {
-            h.renderer.register_pixelbuffer_texture(display, ptr);
-            break;
+        let should_refresh = {
+            let handlers = s.ui_handler.session_handlers.read().unwrap();
+            let Some(h) = handlers.get(&session_id) else {
+                continue;
+            };
+            let texture_changed = h.renderer.register_pixelbuffer_texture(display, ptr);
+            texture_changed
+                && (s.ui_handler.use_texture_render.load(Ordering::Relaxed)
+                    || h.displays.len() > 1)
+        };
+        if should_refresh {
+            // Texture creation in Flutter is asynchronous. A decoded first frame
+            // may have arrived before its texture was registered and been dropped.
+            // A static desktop does not necessarily produce another frame, so
+            // request one now, after releasing the renderer/session locks.
+            log::debug!(
+                "Pixelbuffer texture registered for session {session_id}, display #{display}; requesting a fresh video frame"
+            );
+            s.refresh_video(display as _);
         }
+        break;
     }
 }
 

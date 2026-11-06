@@ -306,6 +306,8 @@ pub mod server {
         let mut last_timeout_ms: i32 = 33;
         let mut spf = Duration::from_millis(last_timeout_ms as _);
         let mut first_frame_captured = false;
+        let mut first_frame_would_block_count = 0u8;
+        let mut logged_gdi_fallback_failure = false;
         let mut dxgi_failed_times = 0;
         let mut display_width = 0;
         let mut display_height = 0;
@@ -338,6 +340,8 @@ pub mod server {
                             c = {
                                 last_current_display = current_display;
                                 first_frame_captured = false;
+                                first_frame_would_block_count = 0;
+                                logged_gdi_fallback_failure = false;
                                 if dxgi_failed_times > MAX_DXGI_FAIL_TIME {
                                     dxgi_failed_times = 0;
                                     v.set_gdi();
@@ -398,6 +402,7 @@ pub mod server {
                             shmem.write(ADDR_CAPTURE_WOULDBLOCK, &utils::i32_to_vec(TRUE));
                             utils::increase_counter(shmem.as_ptr().add(ADDR_CAPTURE_FRAME_COUNTER));
                             first_frame_captured = true;
+                            first_frame_would_block_count = 0;
                             dxgi_failed_times = 0;
                         }
                         Frame::Texture(_) => {
@@ -424,6 +429,28 @@ pub mod server {
                                 std::thread::sleep(spf);
                             }
                         } else {
+                            // Match the normal capturer's startup fallback without
+                            // treating an unchanged desktop after the first frame as a failure.
+                            if !first_frame_captured
+                                && c.as_ref().map(|c| c.is_gdi()) == Some(false)
+                            {
+                                first_frame_would_block_count += 1;
+                                if first_frame_would_block_count >= 4 {
+                                    first_frame_would_block_count = 0;
+                                    if let Some(capturer) = c.as_mut() {
+                                        if capturer.set_gdi() {
+                                            log::info!(
+                                                "No first image from portable DXGI capture, fall back to GDI"
+                                            );
+                                        } else if !logged_gdi_fallback_failure {
+                                            logged_gdi_fallback_failure = true;
+                                            log::warn!(
+                                                "Failed to switch portable capture to GDI before first frame"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                             shmem.write(ADDR_CAPTURE_WOULDBLOCK, &utils::i32_to_vec(TRUE));
                         }
                     }
